@@ -2,21 +2,27 @@
 #include <stdio.h>
 
 /* Represents each tile in the board */
-typedef struct {
+typedef struct Tile *tile;
+struct Tile {
     char bug; /* 1 if there's a bug on this tile, 0 otherwise */
     double emission; /* positive when there's a heat source on this tile,
                         negative when there's a "cold source", and zero
                         otherwise. */
-} Tile;
+};
 
 int getInteger(char*, char*);
 double getFloat(char*, char*);
 void printUsageAndExit(void);
+tile *getNeighbors(tile**, int, int, int, int);
 
 int main(int argc, char *argv[]) {
     int w, h, n, s, nh, nc, t, np, i, j, x, y;
     double c, ph, pc;
-    Tile **board;
+    tile **board;
+
+    /* getNeighbors test variables */
+    int a, b;
+    tile* neigh;
     
     /* Must receive 11 arguments */
     if (argc != 12)
@@ -36,12 +42,13 @@ int main(int argc, char *argv[]) {
     np = getInteger(argv[11], "NP");
     
     /* Constructing the board */
-    board = malloc(h * sizeof(Tile *));
+    board = malloc(h * sizeof(tile *));
     for (i = 0; i < h; i++) {
-        board[i] = malloc(w * sizeof(Tile));
+        board[i] = malloc(w * sizeof(tile));
         for (j = 0; j < w; j++) {
-            board[i][j].bug = 0;
-            board[i][j].emission = 0.0;
+            board[i][j] = malloc(sizeof(struct Tile));
+            board[i][j]->bug = 0;
+            board[i][j]->emission = 0.0;
         }
     }
     
@@ -50,23 +57,90 @@ int main(int argc, char *argv[]) {
     for (i = 0; i < n; i++) {
         x = rand() % w;
         y = rand() % h;
-        if (board[y][x].bug) i--;
-        else board[y][x].bug = 1;
+        if (board[y][x]->bug) i--;
+        else board[y][x]->bug = 1;
     }
     
     /* Printing */
     for (i = 0; i < h; i++) {
         for (j = 0; j < w; j++)
-            printf("%d ", board[i][j].bug);
+            printf("%d ", board[i][j]->bug);
         printf("\n");
     }
+
+    /* getNeighbors test */
+    scanf("%d %d", &a, &b);
+    neigh = getNeighbors(board, a, b, w, h);
     
+    for (j = 0; j < 6; j++)
+        if(neigh[j] == NULL)
+            printf(" ");
+        else
+            printf("%d ", neigh[j]->bug);
+    printf("\n");
+
     /* Freeing memory */
     for (i = 0; i < h; i++)
         free(board[i]);
     free(board);
     
     return 0;
+}
+
+tile *getNeighbors(tile **board, int x, int y, int w, int h) {
+    tile *neighbors = malloc(6 * sizeof(tile));
+
+    if(x % 2 == 0) {
+        if (x == 0)
+            neighbors[0] = NULL;
+        else
+            neighbors[0] = board[x-1][y];
+        if (x == 0 || y == w - 1)
+            neighbors[1] = NULL;
+        else    
+            neighbors[1] = board[x-1][y+1];
+        if (y == 0)
+            neighbors[2] = NULL;
+        else
+            neighbors[2] = board[x][y-1];
+        if (y == w - 1)
+            neighbors[3] = NULL;
+        else
+            neighbors[3] = board[x][y+1];
+        if (x == h - 1)
+            neighbors[4] = NULL;
+        else
+            neighbors[4] = board[x+1][y];
+        if (x == h - 1 || y == w - 1)
+            neighbors[5] = NULL;
+        else
+            neighbors[5] = board[x+1][y+1];
+    }
+    else {
+        if (y == 0)
+            neighbors[0] = NULL;
+        else
+            neighbors[0] = board[x-1][y-1];
+        neighbors[1] = board[x-1][y];
+        if (y == 0)
+            neighbors[2] = NULL;
+        else
+            neighbors[2] = board[x][y-1];
+        if (y == w - 1)
+            neighbors[3] = NULL;
+        else
+            neighbors[3] = board[x][y+1];
+        if (x == h - 1 || y == 0)
+            neighbors[4] = NULL;
+        else
+            neighbors[4] = board[x+1][y-1];
+        if (x == h -1)
+            neighbors[5] = NULL;
+        else
+            neighbors[5] = board[x+1][y];
+    }
+
+    return neighbors;
 }
 
 int getInteger(char *arg, char *name) {
