@@ -1,5 +1,13 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <limits.h>
+#include <pthread.h>
+
+/* Represents coordinates in the board */
+typedef struct {
+    unsigned int x;
+    unsigned int y;
+} Point;
 
 /* Represents each tile in the board */
 typedef struct Tile *tile;
@@ -8,21 +16,25 @@ struct Tile {
     double emission; /* positive when there's a heat source on this tile,
                         negative when there's a "cold source", and zero
                         otherwise. */
+    unsigned int seed; /* seed for the heat/cold source on this tile */
 };
 
-int getInteger(char*, char*);
-double getFloat(char*, char*);
-void printUsageAndExit(void);
+void *tileLoop(void*);
 tile *getNeighbors(tile**, int, int, int, int);
+int getInteger(char*, char*);
+double getDouble(char*, char*);
+void printUsageAndExit(void);
+void printBoard(int, int);
+
+tile **board;
+int w, h, n, s, nh, nc, t, np;
+double c, ph, pc;
+pthread_barrier_t tileBarrier, bugBarrier;
 
 int main(int argc, char *argv[]) {
-    int w, h, n, s, nh, nc, t, np, i, j, x, y;
-    double c, ph, pc;
-    tile **board;
-
-    /* getNeighbors test variables */
-    int a, b;
-    tile* neigh;
+    int i, j, x, y;
+    pthread_t *tileThreads;
+    Point *p;
     
     /* Must receive 11 arguments */
     if (argc != 12)
@@ -33,14 +45,16 @@ int main(int argc, char *argv[]) {
     h = getInteger(argv[2], "H");
     n = getInteger(argv[3], "N");
     s = getInteger(argv[4], "S");
-    c = getFloat(argv[5], "C");
-    ph = getFloat(argv[6], "PH");
+    c = getDouble(argv[5], "C");
+    ph = getDouble(argv[6], "PH");
     nh = getInteger(argv[7], "NH");
-    pc = getFloat(argv[8], "PC");
+    pc = getDouble(argv[8], "PC");
     nc = getInteger(argv[9], "NC");
     t = getInteger(argv[10], "T");
     np = getInteger(argv[11], "NP");
     
+    printf("%d %d %d %d %lf %lf %d %lf %d %d %d\n", w, h, n, s, c, ph, nh, pc, nc, t, np);
+
     /* Constructing the board */
     board = malloc(h * sizeof(tile *));
     for (i = 0; i < h; i++) {
@@ -60,24 +74,24 @@ int main(int argc, char *argv[]) {
         if (board[y][x]->bug) i--;
         else board[y][x]->bug = 1;
     }
-    
-    /* Printing */
-    for (i = 0; i < h; i++) {
-        for (j = 0; j < w; j++)
-            printf("%d ", board[i][j]->bug);
-        printf("\n");
+
+    /* Generating seeds and threads for each tile */
+    tileThreads = malloc(w * h * sizeof(pthread_t));
+    pthread_barrier_init(&tileBarrier, NULL, w * h);
+    for (i = 0; i < w * h; i++) {
+        x = i % w;
+        y = i / w;
+        board[y][x]->seed = s = ((y + 1) * s + x) % RAND_MAX;
+        p = malloc(sizeof(Point));
+        p->x = x;
+        p->y = y;
+        pthread_create(&tileThreads[i], NULL, tileLoop, p);
     }
 
-    /* getNeighbors test */
-    scanf("%d %d", &a, &b);
-    neigh = getNeighbors(board, a, b, w, h);
-    
-    for (j = 0; j < 6; j++)
-        if(neigh[j] == NULL)
-            printf(" ");
-        else
-            printf("%d ", neigh[j]->bug);
-    printf("\n");
+    for (i = 0; i < w * h; i++)
+        pthread_join(tileThreads[i], NULL);
+
+    printBoard(w, h);
 
     /* Freeing memory */
     for (i = 0; i < h; i++)
@@ -85,6 +99,34 @@ int main(int argc, char *argv[]) {
     free(board);
     
     return 0;
+}
+
+/* Loop executed by each tile until the simulation ends */
+void *tileLoop(void *args) {
+    Point p = *((Point*)args);
+    int count, lifetime;
+    for (count = 0; count < t; count++) {
+        if (board[p.y][p.x]->emission == 0) {
+            int r = rand_r(&board[p.y][p.x]->seed);
+            char hs = ((float)r / RAND_MAX) <= ph;
+            r = rand_r(&board[p.y][p.x]->seed);
+            char cs = ((float)r / RAND_MAX) <= pc;
+            if (hs && !cs) {
+                board[p.y][p.x]->emission = c;
+                lifetime = nh;
+            }
+            if (cs && !hs) {
+                board[p.y][p.x]->emission = -c;
+                lifetime = nc;
+            }
+        } else {
+            lifetime--;
+            if (lifetime == 0)
+                board[p.y][p.x]->emission = 0;
+        }
+        pthread_barrier_wait(&tileBarrier);
+    }
+    return NULL;
 }
 
 tile *getNeighbors(tile **board, int x, int y, int w, int h) {
@@ -152,7 +194,7 @@ int getInteger(char *arg, char *name) {
     return x;
 }
 
-double getFloat(char *arg, char *name) {
+double getDouble(char *arg, char *name) {
     double x = atof(arg);
     if (x <= 0.0) {
         printf("The value of %s must be a positive number.\n\n", name);
@@ -175,4 +217,14 @@ NC\tnumber of iterations the \"cold sources\" will last\n\
 T\ttotal iterations for the simulation\n\
 NP\tnumber of processors to be used\n");
     exit(1);
+}
+
+void printBoard(int w, int h) {
+    int i, j;
+    for (i = 0; i < h; i++) {
+        for (j = 0; j < w; j++) {
+            printf("%hhd %10lf %10u|", board[i][j]->bug, board[i][j]->emission, board[i][j]->seed);
+        }
+        printf("\n");
+    }
 }
