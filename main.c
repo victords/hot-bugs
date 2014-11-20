@@ -23,13 +23,13 @@ struct Tile {
 void *tileLoop(void*);
 tile *getNeighbors(tile**, int, int, int, int);
 int getInteger(char*, char*);
-double getDouble(char*, char*, double);
+double getDouble(char*, char*, double, double);
 void printUsageAndExit(void);
 void printBoard(int, int);
 
 tile **board;
 int w, h, n, s, nh, nc, t, np;
-double c, ph, pc;
+double c, tmin, tmax, ph, pc;
 pthread_barrier_t tileBarrier, bugBarrier;
 
 int main(int argc, char *argv[]) {
@@ -38,7 +38,7 @@ int main(int argc, char *argv[]) {
     Point *p;
     
     /* Must receive 11 arguments */
-    if (argc != 12)
+    if (argc != 14)
         printUsageAndExit();
     
     /* Getting argument values */
@@ -46,13 +46,20 @@ int main(int argc, char *argv[]) {
     h = getInteger(argv[2], "H");
     n = getInteger(argv[3], "N");
     s = getInteger(argv[4], "S");
-    c = getDouble(argv[5], "C", DBL_MAX);
-    ph = getDouble(argv[6], "PH", 1.0);
-    nh = getInteger(argv[7], "NH");
-    pc = getDouble(argv[8], "PC", 1.0);
-    nc = getInteger(argv[9], "NC");
-    t = getInteger(argv[10], "T");
-    np = getInteger(argv[11], "NP");
+    c = getDouble(argv[5], "C", 0.0, DBL_MAX);
+    tmin = getDouble(argv[6], "TMIN", -DBL_MAX, DBL_MAX);
+    tmax = getDouble(argv[7], "TMAX", -DBL_MAX, DBL_MAX);
+    ph = getDouble(argv[8], "PH", 0.0, 1.0);
+    nh = getInteger(argv[9], "NH");
+    pc = getDouble(argv[10], "PC", 0.0, 1.0);
+    nc = getInteger(argv[11], "NC");
+    t = getInteger(argv[12], "T");
+    np = getInteger(argv[13], "NP");
+    
+    if (tmin >= tmax) {
+        printf("The value of TMIN must be strictly less than TMAX.\n");
+        printUsageAndExit();
+    }
     
     printf("%d %d %d %d %lf %lf %d %lf %d %d %d\n", w, h, n, s, c, ph, nh, pc, nc, t, np);
 
@@ -199,26 +206,32 @@ int getInteger(char *arg, char *name) {
     return x;
 }
 
-double getDouble(char *arg, char *name, double limit) {
+double getDouble(char *arg, char *name, double lower_limit, double upper_limit) {
     double x = atof(arg);
-    if (x <= 0.0) {
-        printf("The value of %s must be a positive number.\n\n", name);
+    if (x == 0.0) {
+        printf("The value of %s must be a non-zero number.\n\n", name);
         printUsageAndExit();
     }
-    if (x > limit) {
-        printf("The value of %s must be less then %.1lf.\n\n", name, limit);
+    if (x < lower_limit) {
+        printf("The value of %s must be greater than %.1lf.\n\n", name, lower_limit);
+        printUsageAndExit();
+    }
+    if (x > upper_limit) {
+        printf("The value of %s must be less than %.1lf.\n\n", name, upper_limit);
         printUsageAndExit();
     }
     return x;
 }
 
 void printUsageAndExit() {
-    printf("Usage: hot-bugs W H N S C PH NH PC NC T NP\n=====\n\
+    printf("Usage: hot-bugs W H N S C TMIN TMAX PH NH PC NC T NP\n=====\n\
 W\twidth of the board\n\
 H\theight of the board\n\
 N\tnumber of bugs\n\
 S\tseed for the random number generator\n\
 C\tconstant of heat emission by the bugs\n\
+TMIN\ttemperature below which the bugs will look for heat\n\
+TMAX\ttemperature above which the bugs will look for cold\n\
 PH\tprobability of heat source appearance\n\
 NH\tnumber of iterations the heat sources will last\n\
 PC\tprobability of \"cold source\" appearance\n\
