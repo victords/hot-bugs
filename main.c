@@ -13,14 +13,16 @@ typedef struct {
 /* Represents each tile in the board */
 typedef struct Tile *tile;
 struct Tile {
-    char bug; /* 1 if there's a bug on this tile, 0 otherwise */
-    double emission; /* positive when there's a heat source on this tile,
-                        negative when there's a "cold source", and zero
-                        otherwise. */
-    unsigned int seed; /* seed for the heat/cold source on this tile */
+    char bug;           /* 1 if there's a bug on this tile, 0 otherwise */
+    double temperature; /* temperature on this tile */
+    double emission;    /* positive when there's a heat source on this tile,
+                           negative when there's a "cold source", and zero
+                           otherwise. */
+    unsigned int seed;  /* seed for the heat/cold source on this tile */
 };
 
 void *tileLoop(void*);
+void *bugLoop(void*);
 tile *getNeighbors(tile**, int, int, int, int);
 int getInteger(char*, char*);
 double getDouble(char*, char*, double, double);
@@ -34,7 +36,7 @@ pthread_barrier_t tileBarrier, bugBarrier;
 
 int main(int argc, char *argv[]) {
     int i, j, x, y;
-    pthread_t *tileThreads;
+    pthread_t *tileThreads, *bugThreads;
     Point *p;
     
     /* Must receive 11 arguments */
@@ -76,11 +78,16 @@ int main(int argc, char *argv[]) {
     
     /* Generating bugs */
     srand(s);
+    bugThreads = malloc(n * sizeof(pthread_t));
+    pthread_barrier_init(&bugBarrier, NULL, w * h);
     for (i = 0; i < n; i++) {
         x = rand() % w;
         y = rand() % h;
         if (board[y][x]->bug) i--;
-        else board[y][x]->bug = 1;
+        else {
+            board[y][x]->bug = 1;
+            pthread_create(&bugThreads[i], NULL, bugLoop, NULL);
+        }
     }
 
     /* Generating seeds and threads for each tile */
@@ -98,6 +105,8 @@ int main(int argc, char *argv[]) {
 
     for (i = 0; i < w * h; i++)
         pthread_join(tileThreads[i], NULL);
+    for (i = 0; i < n; i++)
+        pthread_join(bugThreads[i], NULL);
 
     printBoard(w, h);
 
@@ -137,6 +146,14 @@ void *tileLoop(void *args) {
         
         /* Calculating the temperature */
         
+    }
+    return NULL;
+}
+
+void *bugLoop(void *args) {
+    int count = 0;
+    for (count = 0; count < t; count++) {
+        /* fazer algo */
     }
     return NULL;
 }
