@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <limits.h>
+#include <float.h>
 #include <pthread.h>
 
 /* Represents coordinates in the board */
@@ -22,7 +23,7 @@ struct Tile {
 void *tileLoop(void*);
 tile *getNeighbors(tile**, int, int, int, int);
 int getInteger(char*, char*);
-double getDouble(char*, char*);
+double getDouble(char*, char*, double);
 void printUsageAndExit(void);
 void printBoard(int, int);
 
@@ -45,10 +46,10 @@ int main(int argc, char *argv[]) {
     h = getInteger(argv[2], "H");
     n = getInteger(argv[3], "N");
     s = getInteger(argv[4], "S");
-    c = getDouble(argv[5], "C");
-    ph = getDouble(argv[6], "PH");
+    c = getDouble(argv[5], "C", DBL_MAX);
+    ph = getDouble(argv[6], "PH", 1.0);
     nh = getInteger(argv[7], "NH");
-    pc = getDouble(argv[8], "PC");
+    pc = getDouble(argv[8], "PC", 1.0);
     nc = getInteger(argv[9], "NC");
     t = getInteger(argv[10], "T");
     np = getInteger(argv[11], "NP");
@@ -106,6 +107,7 @@ void *tileLoop(void *args) {
     Point p = *((Point*)args);
     int count, lifetime;
     for (count = 0; count < t; count++) {
+        /* Heat and cold sources */
         if (board[p.y][p.x]->emission == 0) {
             int r = rand_r(&board[p.y][p.x]->seed);
             char hs = ((float)r / RAND_MAX) <= ph;
@@ -125,6 +127,9 @@ void *tileLoop(void *args) {
                 board[p.y][p.x]->emission = 0;
         }
         pthread_barrier_wait(&tileBarrier);
+        
+        /* Calculating the temperature */
+        
     }
     return NULL;
 }
@@ -194,10 +199,14 @@ int getInteger(char *arg, char *name) {
     return x;
 }
 
-double getDouble(char *arg, char *name) {
+double getDouble(char *arg, char *name, double limit) {
     double x = atof(arg);
     if (x <= 0.0) {
         printf("The value of %s must be a positive number.\n\n", name);
+        printUsageAndExit();
+    }
+    if (x > limit) {
+        printf("The value of %s must be less then %.1lf.\n\n", name, limit);
         printUsageAndExit();
     }
     return x;
@@ -222,9 +231,8 @@ NP\tnumber of processors to be used\n");
 void printBoard(int w, int h) {
     int i, j;
     for (i = 0; i < h; i++) {
-        for (j = 0; j < w; j++) {
+        for (j = 0; j < w; j++)
             printf("%hhd %10lf %10u|", board[i][j]->bug, board[i][j]->emission, board[i][j]->seed);
-        }
         printf("\n");
     }
 }
