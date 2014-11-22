@@ -28,6 +28,9 @@ int getInteger(char*, char*);
 double getDouble(char*, char*, double, double);
 void printUsageAndExit(void);
 void printBoard(int, int);
+void printFinalState(Point*);
+/* For testing */
+Point *buildBugsArray(void);
 
 tile **board;
 int w, h, n, s, nh, nc, t, np;
@@ -38,6 +41,9 @@ int main(int argc, char *argv[]) {
     int i, j, x, y;
     pthread_t *tileThreads, *bugThreads;
     Point *p;
+
+    /* For testing */
+    Point *bugsArray;
     
     /* Must receive 11 arguments */
     if (argc != 14)
@@ -109,6 +115,8 @@ int main(int argc, char *argv[]) {
         pthread_join(bugThreads[i], NULL);
 
     printBoard(w, h);
+    bugsArray = buildBugsArray();
+    printFinalState(bugsArray);
 
     /* Freeing memory */
     for (i = 0; i < h; i++)
@@ -223,18 +231,18 @@ int getInteger(char *arg, char *name) {
     return x;
 }
 
-double getDouble(char *arg, char *name, double lower_limit, double upper_limit) {
+double getDouble(char *arg, char *name, double lowerLimit, double upperLimit) {
     double x = atof(arg);
     if (x == 0.0) {
         printf("The value of %s must be a non-zero number.\n\n", name);
         printUsageAndExit();
     }
-    if (x < lower_limit) {
-        printf("The value of %s must be greater than %.1lf.\n\n", name, lower_limit);
+    if (x < lowerLimit) {
+        printf("The value of %s must be greater than %.1lf.\n\n", name, lowerLimit);
         printUsageAndExit();
     }
-    if (x > upper_limit) {
-        printf("The value of %s must be less than %.1lf.\n\n", name, upper_limit);
+    if (x > upperLimit) {
+        printf("The value of %s must be less than %.1lf.\n\n", name, upperLimit);
         printUsageAndExit();
     }
     return x;
@@ -265,4 +273,46 @@ void printBoard(int w, int h) {
             printf("%hhd %10lf %10u|", board[i][j]->bug, board[i][j]->emission, board[i][j]->seed);
         printf("\n");
     }
+}
+
+void printFinalState(Point *bugs) {
+	int i;
+	FILE* saida;
+
+	/* Open file */
+	saida = fopen("hotbugs.txt", "w");
+	if(saida == NULL) {
+		fprintf(stderr, "Erro! Arquivo de saída não pode ser criado.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	/* Print inside the file */
+	for(i = 0; i < n; i++) {
+		fprintf(saida, "Joaninha nº %d\n", i);
+		fprintf(saida, "Posição (x, y): (%u, %u)\n", bugs[i].y, bugs[i].x);
+		fprintf(saida, "Temperatura: %lf\n", board[bugs[i].y][bugs[i].x]->temperature);
+	}
+
+	/* Close file */
+	fclose(saida);
+}
+
+/* For testing */
+Point *buildBugsArray(){
+	Point *bugs = malloc(n * sizeof(Point));
+    int i, j, k;
+	k = 0; 
+	for(i = 0; i < h; i++) {
+		for(j = 0; j < w; j++) {
+			printf("%d %d %d\n", i, j, k);
+			if(board[i][j]->bug == 1) {
+				printf("ACHEI! \n");
+                bugs[k].x = j;
+                bugs[k].y = i;
+                printf("%u %u\n", bugs[k].x, bugs[k].y);
+                k++;
+			}
+		}
+	}
+    return bugs;
 }
