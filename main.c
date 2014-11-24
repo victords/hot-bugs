@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <limits.h>
 #include <float.h>
+#include <math.h>
 #include <pthread.h>
 
 /* Represents coordinates in the board */
@@ -222,6 +223,21 @@ tile *getNeighbors(tile **board, int i, int j, int w, int h) {
     }
 
     return neighbors;
+}
+
+double getDistance(int i1, int j1, int i2, int j2) {
+	double dx, dy;
+	if ((i2 - i1) % 2 == 0)
+		dx = abs(j2 - j1);
+	else if (j1 <= j2) {
+		if (i1 % 2 == 0) dx = fabs(j2 - j1 - 0.5);
+		else dx = j2 - j1 + 0.5;
+	} else {
+		if (i2 % 2 == 0) dx = fabs(j1 - j2 - 0.5);
+		else dx = j1 - j2 + 0.5;
+	}
+	dy = abs(i2 - i1) * sqrt(3) * 0.5;
+	return sqrt(dx * dx + dy * dy);
 }
 
 int getInteger(char *arg, char *name) {
