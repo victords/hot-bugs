@@ -6,8 +6,8 @@
 
 /* Represents coordinates in the board */
 typedef struct {
-    unsigned int x;
-    unsigned int y;
+    unsigned int i;
+    unsigned int j;
 } Point;
 
 /* Represents each tile in the board */
@@ -29,21 +29,17 @@ double getDouble(char*, char*, double, double);
 void printUsageAndExit(void);
 void printBoard(int, int);
 void printFinalState(Point*);
-/* For testing */
-Point *buildBugsArray(void);
 
 tile **board;
+Point *bugs;
 int w, h, n, s, nh, nc, t, np;
 double c, tmin, tmax, ph, pc;
 pthread_barrier_t tileBarrier, bugBarrier;
 
 int main(int argc, char *argv[]) {
-    int i, j, x, y;
+    int i, j, ii, jj;
     pthread_t *tileThreads, *bugThreads;
     Point *p;
-
-    /* For testing */
-    Point *bugsArray;
     
     /* Must receive 11 arguments */
     if (argc != 14)
@@ -64,6 +60,10 @@ int main(int argc, char *argv[]) {
     t = getInteger(argv[12], "T");
     np = getInteger(argv[13], "NP");
     
+    if (n >= w * h) {
+        printf("The number of bugs must be less than the size of the board (W * H).\n");
+        printUsageAndExit();
+    }
     if (tmin >= tmax) {
         printf("The value of TMIN must be strictly less than TMAX.\n");
         printUsageAndExit();
@@ -84,14 +84,17 @@ int main(int argc, char *argv[]) {
     
     /* Generating bugs */
     srand(s);
+    bugs = malloc(n * sizeof(Point));
     bugThreads = malloc(n * sizeof(pthread_t));
     pthread_barrier_init(&bugBarrier, NULL, w * h);
     for (i = 0; i < n; i++) {
-        x = rand() % w;
-        y = rand() % h;
-        if (board[y][x]->bug) i--;
+        ii = rand() % h;
+        jj = rand() % w;
+        if (board[ii][jj]->bug) i--;
         else {
-            board[y][x]->bug = 1;
+            board[ii][jj]->bug = 1;
+            bugs[i].i = ii;
+            bugs[i].j = jj;
             pthread_create(&bugThreads[i], NULL, bugLoop, NULL);
         }
     }
@@ -100,12 +103,12 @@ int main(int argc, char *argv[]) {
     tileThreads = malloc(w * h * sizeof(pthread_t));
     pthread_barrier_init(&tileBarrier, NULL, w * h);
     for (i = 0; i < w * h; i++) {
-        x = i % w;
-        y = i / w;
-        board[y][x]->seed = s = ((y + 1) * s + x) % RAND_MAX;
+        ii = i / w;
+        jj = i % w;
+        board[ii][jj]->seed = s = ((ii + 1) * s + jj) % RAND_MAX;
         p = malloc(sizeof(Point));
-        p->x = x;
-        p->y = y;
+        p->i = ii;
+        p->j = jj;
         pthread_create(&tileThreads[i], NULL, tileLoop, p);
     }
 
@@ -115,8 +118,7 @@ int main(int argc, char *argv[]) {
         pthread_join(bugThreads[i], NULL);
 
     printBoard(w, h);
-    bugsArray = buildBugsArray();
-    printFinalState(bugsArray);
+    printFinalState(bugs);
 
     /* Freeing memory */
     for (i = 0; i < h; i++)
@@ -129,31 +131,31 @@ int main(int argc, char *argv[]) {
 /* Loop executed by each tile until the simulation ends */
 void *tileLoop(void *args) {
     Point p = *((Point*)args);
-    int count, lifetime;
+    int count, lifetime, i;
+    double temperature;
     for (count = 0; count < t; count++) {
         /* Heat and cold sources */
-        if (board[p.y][p.x]->emission == 0) {
-            int r = rand_r(&board[p.y][p.x]->seed);
+        if (board[p.i][p.j]->emission == 0) {
+            int r = rand_r(&board[p.i][p.j]->seed);
             char hs = ((float)r / RAND_MAX) <= ph;
-            r = rand_r(&board[p.y][p.x]->seed);
+            r = rand_r(&board[p.i][p.j]->seed);
             char cs = ((float)r / RAND_MAX) <= pc;
             if (hs && !cs) {
-                board[p.y][p.x]->emission = c;
+                board[p.i][p.j]->emission = c;
                 lifetime = nh;
             }
             if (cs && !hs) {
-                board[p.y][p.x]->emission = -c;
+                board[p.i][p.j]->emission = -c;
                 lifetime = nc;
             }
         } else {
             lifetime--;
             if (lifetime == 0)
-                board[p.y][p.x]->emission = 0;
+                board[p.i][p.j]->emission = 0;
         }
         pthread_barrier_wait(&tileBarrier);
         
         /* Calculating the temperature */
-        
     }
     return NULL;
 }
@@ -166,57 +168,57 @@ void *bugLoop(void *args) {
     return NULL;
 }
 
-tile *getNeighbors(tile **board, int x, int y, int w, int h) {
+tile *getNeighbors(tile **board, int i, int j, int w, int h) {
     tile *neighbors = malloc(6 * sizeof(tile));
 
-    if(x % 2 == 0) {
-        if (x == 0)
+    if(i % 2 == 0) {
+        if (i == 0)
             neighbors[0] = NULL;
         else
-            neighbors[0] = board[x-1][y];
-        if (x == 0 || y == w - 1)
+            neighbors[0] = board[i-1][j];
+        if (i == 0 || j == w - 1)
             neighbors[1] = NULL;
         else    
-            neighbors[1] = board[x-1][y+1];
-        if (y == 0)
+            neighbors[1] = board[i-1][j+1];
+        if (j == 0)
             neighbors[2] = NULL;
         else
-            neighbors[2] = board[x][y-1];
-        if (y == w - 1)
+            neighbors[2] = board[i][j-1];
+        if (j == w - 1)
             neighbors[3] = NULL;
         else
-            neighbors[3] = board[x][y+1];
-        if (x == h - 1)
+            neighbors[3] = board[i][j+1];
+        if (i == h - 1)
             neighbors[4] = NULL;
         else
-            neighbors[4] = board[x+1][y];
-        if (x == h - 1 || y == w - 1)
+            neighbors[4] = board[i+1][j];
+        if (i == h - 1 || j == w - 1)
             neighbors[5] = NULL;
         else
-            neighbors[5] = board[x+1][y+1];
+            neighbors[5] = board[i+1][j+1];
     }
     else {
-        if (y == 0)
+        if (j == 0)
             neighbors[0] = NULL;
         else
-            neighbors[0] = board[x-1][y-1];
-        neighbors[1] = board[x-1][y];
-        if (y == 0)
+            neighbors[0] = board[i-1][j-1];
+        neighbors[1] = board[i-1][j];
+        if (j == 0)
             neighbors[2] = NULL;
         else
-            neighbors[2] = board[x][y-1];
-        if (y == w - 1)
+            neighbors[2] = board[i][j-1];
+        if (j == w - 1)
             neighbors[3] = NULL;
         else
-            neighbors[3] = board[x][y+1];
-        if (x == h - 1 || y == 0)
+            neighbors[3] = board[i][j+1];
+        if (i == h - 1 || j == 0)
             neighbors[4] = NULL;
         else
-            neighbors[4] = board[x+1][y-1];
-        if (x == h -1)
+            neighbors[4] = board[i+1][j-1];
+        if (i == h -1)
             neighbors[5] = NULL;
         else
-            neighbors[5] = board[x+1][y];
+            neighbors[5] = board[i+1][j];
     }
 
     return neighbors;
@@ -289,30 +291,12 @@ void printFinalState(Point *bugs) {
 	/* Print inside the file */
 	for(i = 0; i < n; i++) {
 		fprintf(saida, "Joaninha nº %d\n", i);
-		fprintf(saida, "Posição (x, y): (%u, %u)\n", bugs[i].y, bugs[i].x);
-		fprintf(saida, "Temperatura: %lf\n", board[bugs[i].y][bugs[i].x]->temperature);
+		fprintf(saida, "Posição (i, j): (%u, %u)\n", bugs[i].i, bugs[i].j);
+		fprintf(saida, "Temperatura: %lf\n", board[bugs[i].i][bugs[i].j]->temperature);
+		if (i < n - 1)
+			fprintf(saida, "========================================\n");
 	}
 
 	/* Close file */
 	fclose(saida);
-}
-
-/* For testing */
-Point *buildBugsArray(){
-	Point *bugs = malloc(n * sizeof(Point));
-    int i, j, k;
-	k = 0; 
-	for(i = 0; i < h; i++) {
-		for(j = 0; j < w; j++) {
-			printf("%d %d %d\n", i, j, k);
-			if(board[i][j]->bug == 1) {
-				printf("ACHEI! \n");
-                bugs[k].x = j;
-                bugs[k].y = i;
-                printf("%u %u\n", bugs[k].x, bugs[k].y);
-                k++;
-			}
-		}
-	}
-    return bugs;
 }
