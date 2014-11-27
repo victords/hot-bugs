@@ -7,14 +7,14 @@
 
 /* Represents coordinates in the board */
 typedef struct {
-    unsigned int i;
-    unsigned int j;
+    int i;
+    int j;
 } Point;
 
 /* Represents heat or cold sources */
 typedef struct {
-    unsigned int i;
-    unsigned int j;
+    int i;
+    int j;
     double emission;
 } Source;
 
@@ -23,6 +23,7 @@ typedef struct {
     char element;       /* 0 if the tile is empty, 1 if there's a bug, 2 if there's a heat source or 3 if there's a cold source */
     double temperature; /* temperature on this tile */
     unsigned int seed;  /* seed for the heat/cold source on this tile */
+    int lifetime;       /* remaining lifetime of the heat/cold source on this tile (if there's any) */
 } Tile;
 
 void *loop(void*);
@@ -35,8 +36,7 @@ void printFinalState(Point*);
 
 Tile ***board;
 Point *bugs;
-Source *sources;
-int w, h, n, s, nh, nc, t, np, sourceCount, tilesPerThread, tilesRemainder, bugsPerThread, bugsRemainder;
+int w, h, n, s, nh, nc, t, np, tilesPerThread, tilesRemainder, bugsPerThread, bugsRemainder;
 double c, tmin, tmax, ph, pc;
 pthread_mutex_t mutex;
 pthread_barrier_t barrier;
@@ -91,7 +91,7 @@ int main(int argc, char *argv[]) {
             board[i][j]->element = 0;
         }
     }
-    
+
     /* Generating bugs */
     srand(s);
     bugs = malloc(n * sizeof(Point));
@@ -105,22 +105,20 @@ int main(int argc, char *argv[]) {
             bugs[k].j = j;
         }
     }
-
-    /* Generating seeds and heat/cold sources array */
-    sources = malloc(size * sizeof(Source));
-    sourceCount = 0;
+    
+    /* Generating seeds */
     for (k = 0; k < size; k++) {
         i = k / w;
         j = k % w;
         board[i][j]->seed = s = ((i + 1) * s + j) % RAND_MAX;
     }
     
+    /* Generating threads */
     threads = malloc(np * sizeof(pthread_t));
     pthread_mutex_init(&mutex, NULL);
     pthread_barrier_init(&barrier, NULL, np);
     bugsStartPoint = tilesStartPoint = 0;
     for (k = 0; k < np; k++) {
-        printf("iniciando thread %d %d\n", bugsStartPoint, tilesStartPoint);
         /* Using a Point just to store the two start points which must be passed as parameters to the thread function */
         p = malloc(sizeof(Point));
         p->i = bugsStartPoint;
@@ -130,11 +128,9 @@ int main(int argc, char *argv[]) {
         tilesStartPoint += tilesPerThread + (k < tilesRemainder ? 1 : 0);
     }
 
-    for (k = 0; k < np; k++) {
-        printf("tentando join...\n");
+    for (k = 0; k < np; k++)
         pthread_join(threads[k], NULL);
-    }
-printf("joinou\n");
+    
     printBoard(w, h);
     printFinalState(bugs);
 
@@ -147,7 +143,6 @@ printf("joinou\n");
 }
 
 void *loop(void *args) {
-    printf("entrou\n");
     Point p = *((Point *)args);
     int bugsStartPoint = p.i,
         bugsId = bugsStartPoint / bugsPerThread,
@@ -155,15 +150,15 @@ void *loop(void *args) {
         tilesStartPoint = p.j,
         tilesId = tilesStartPoint / tilesPerThread,
         tilesEndPoint = tilesStartPoint + (tilesPerThread + (tilesId < tilesRemainder ? 1 : 0)),
-        count, lifetime, i, j, k;
+        count, i, j, k;
     // double temperature;
     free(args);
+    printf("starting thread %d (%d, %d)\n", tilesId, tilesStartPoint, tilesEndPoint);
     for (count = 0; count < t; count++) {
-        printf("iteracao: %d\n", count);
+        // printf("iteration %d\n", count);
         for (k = tilesStartPoint; k < tilesEndPoint; k++) {
             i = k / w;
             j = k % w;
-            printf("(%d, %d)\n", i, j);
             /* Heat and cold sources */
             if (board[i][j]->element == 0) {
                 int r = rand_r(&board[i][j]->seed);
@@ -172,31 +167,21 @@ void *loop(void *args) {
                 char cs = ((float)r / RAND_MAX) <= pc;
                 if (hs && !cs) {
                     board[i][j]->element = 2;
-                    pthread_mutex_lock(&mutex);
-                    sources[sourceCount].i = i;
-                    sources[sourceCount].j = j;
-                    sources[sourceCount++].emission = c;
-                    pthread_mutex_unlock(&mutex);
-                    lifetime = nh;
+                    board[i][j]->lifetime = nh;
                 }
                 if (cs && !hs) {
                     board[i][j]->element = 3;
-                    pthread_mutex_lock(&mutex);
-                    sources[sourceCount].i = i;
-                    sources[sourceCount].j = j;
-                    sources[sourceCount++].emission = -c;
-                    pthread_mutex_unlock(&mutex);
-                    lifetime = nc;
+                    board[i][j]->lifetime = nc;
                 }
-            } else {
-                lifetime--;
-                if (lifetime == 0)
+            } else if (board[i][j]->element > 1) {
+                board[i][j]->lifetime--;
+                if (board[i][j]->lifetime == 0)
                     board[i][j]->element = 0;
             }
-            pthread_barrier_wait(&barrier);
-            
-            /* Calculating the temperature */
         }
+        // pthread_barrier_wait(&barrier);
+
+        /* Calculating the temperature */
     }
     return NULL;
 }
