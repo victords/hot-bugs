@@ -32,11 +32,12 @@ int getInteger(char*, char*);
 double getDouble(char*, char*, double, double);
 void printUsageAndExit(void);
 void printBoard(int, int);
-void printFinalState(Point*);
+void printFinalState(Point**);
 
 Tile ***board;
-Point *bugs;
-int w, h, n, s, nh, nc, t, np, tilesPerThread, tilesRemainder, bugsPerThread, bugsRemainder;
+Point **bugs;
+Source **sources;
+int w, h, n, s, nh, nc, t, np, tilesPerThread, tilesRemainder, bugsPerThread, bugsRemainder, sourceCount;
 double c, tmin, tmax, ph, pc;
 pthread_mutex_t mutex;
 pthread_barrier_t barrier;
@@ -89,20 +90,22 @@ int main(int argc, char *argv[]) {
         for (j = 0; j < w; j++) {
             board[i][j] = malloc(sizeof(Tile));
             board[i][j]->element = 0;
+            board[i][j]->temperature = 0;
         }
     }
 
     /* Generating bugs */
     srand(s);
-    bugs = malloc(n * sizeof(Point));
+    bugs = malloc(n * sizeof(Point *));
     for (k = 0; k < n; k++) {
         i = rand() % h;
         j = rand() % w;
         if (board[i][j]->element) k--;
         else {
             board[i][j]->element = 1;
-            bugs[k].i = i;
-            bugs[k].j = j;
+            bugs[k] = malloc(sizeof(Point));
+            bugs[k]->i = i;
+            bugs[k]->j = j;
         }
     }
     
@@ -113,6 +116,10 @@ int main(int argc, char *argv[]) {
         board[i][j]->seed = s = ((i + 1) * s + j) % RAND_MAX;
     }
     
+    /* Initializing heat/cold sources array */
+    sources = malloc(size * sizeof(Source *));
+    sourceCount = 0;
+
     /* Generating threads */
     threads = malloc(np * sizeof(pthread_t));
     pthread_mutex_init(&mutex, NULL);
@@ -130,13 +137,26 @@ int main(int argc, char *argv[]) {
 
     for (k = 0; k < np; k++)
         pthread_join(threads[k], NULL);
-    
-    printBoard(w, h);
-    printFinalState(bugs);
+
+    // printBoard(w, h);
+    // printFinalState(bugs);
 
     /* Freeing memory */
-    for (k = 0; k < h; k++)
-        free(board[k]);
+    free(threads);
+
+    for (k = 0; k < n; k++)
+        free(bugs[k]);
+    free(bugs);
+
+    for (k = 0; k < sourceCount; k++)
+        free(sources[k]);
+    free(sources);
+
+    for (i = 0; i < h; i++) {
+        for (j = 0; j < w; j++)
+            free(board[i][j]);
+        free(board[i]);
+    }
     free(board);
     
     return 0;
@@ -150,12 +170,12 @@ void *loop(void *args) {
         tilesStartPoint = p.j,
         tilesId = tilesStartPoint / tilesPerThread,
         tilesEndPoint = tilesStartPoint + (tilesPerThread + (tilesId < tilesRemainder ? 1 : 0)),
-        count, i, j, k;
+        count, i, j, k, l;
     // double temperature;
     free(args);
     printf("starting thread %d (%d, %d)\n", tilesId, tilesStartPoint, tilesEndPoint);
     for (count = 0; count < t; count++) {
-        // printf("iteration %d\n", count);
+        printf("iteration %d, sourceCount %d\n", count, sourceCount);
         for (k = tilesStartPoint; k < tilesEndPoint; k++) {
             i = k / w;
             j = k % w;
@@ -168,15 +188,38 @@ void *loop(void *args) {
                 if (hs && !cs) {
                     board[i][j]->element = 2;
                     board[i][j]->lifetime = nh;
+                    pthread_mutex_lock(&mutex);
+                    sources[sourceCount] = malloc(sizeof(Source));
+                    sources[sourceCount]->i = i;
+                    sources[sourceCount]->j = j;
+                    sources[sourceCount++]->emission = c;
+                    pthread_mutex_unlock(&mutex);
                 }
                 if (cs && !hs) {
                     board[i][j]->element = 3;
                     board[i][j]->lifetime = nc;
+                    pthread_mutex_lock(&mutex);
+                    sources[sourceCount] = malloc(sizeof(Source));
+                    sources[sourceCount]->i = i;
+                    sources[sourceCount]->j = j;
+                    sources[sourceCount++]->emission = -c;
+                    pthread_mutex_unlock(&mutex);
                 }
             } else if (board[i][j]->element > 1) {
                 board[i][j]->lifetime--;
-                if (board[i][j]->lifetime == 0)
+                if (board[i][j]->lifetime == 0) {
                     board[i][j]->element = 0;
+                    pthread_mutex_lock(&mutex);
+                    for (l = 0; l < sourceCount; l++) {
+                        if (sources[l]->i == i && sources[l]->j == j) {
+                            free(sources[l]);
+                            sourceCount--;
+                            for (; l < sourceCount; l++)
+                                sources[l] = sources[l + 1];
+                        }
+                    }
+                    pthread_mutex_unlock(&mutex);
+                }
             }
         }
         // pthread_barrier_wait(&barrier);
@@ -305,12 +348,12 @@ void printBoard(int w, int h) {
     int i, j;
     for (i = 0; i < h; i++) {
         for (j = 0; j < w; j++)
-            printf("%hhd %10u|", board[i][j]->element, board[i][j]->seed);
+            printf("%hhd|", board[i][j]->element);
         printf("\n");
     }
 }
 
-void printFinalState(Point *bugs) {
+void printFinalState(Point **bugs) {
 	int i;
 	FILE* saida;
 
@@ -324,8 +367,8 @@ void printFinalState(Point *bugs) {
 	/* Print inside the file */
 	for(i = 0; i < n; i++) {
 		fprintf(saida, "Joaninha nº %d\n", i);
-		fprintf(saida, "Posição (i, j): (%u, %u)\n", bugs[i].i, bugs[i].j);
-		fprintf(saida, "Temperatura: %lf\n", board[bugs[i].i][bugs[i].j]->temperature);
+		fprintf(saida, "Posição (i, j): (%u, %u)\n", bugs[i]->i, bugs[i]->j);
+		fprintf(saida, "Temperatura: %lf\n", board[bugs[i]->i][bugs[i]->j]->temperature);
 		if (i < n - 1)
 			fprintf(saida, "========================================\n");
 	}
