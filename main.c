@@ -5,11 +5,19 @@
 #include <math.h>
 #include <pthread.h>
 
-/* Represents coordinates in the board */
+/* Used to be passed as parameter for the threads */
+typedef struct {
+    int bugs;
+    int sources;
+} StartPoints;
+
+/* Represents bugs */
 typedef struct {
     int i;
     int j;
-} Point;
+    void *nextTile; /* candidate to next tile where this bug will move */
+                    /* type is 'void*' to avoid cross-reference */
+} Bug;
 
 /* Represents heat or cold sources */
 typedef struct {
@@ -20,22 +28,28 @@ typedef struct {
 
 /* Represents each tile in the board */
 typedef struct {
+    int i;
+    int j;
     char element;       /* 0 if the tile is empty, 1 if there's a bug, 2 if there's a heat source or 3 if there's a cold source */
     double temperature; /* temperature on this tile */
     unsigned int seed;  /* seed for the heat/cold source on this tile */
     int lifetime;       /* remaining lifetime of the heat/cold source on this tile (if there's any) */
+    Bug *candidates[6]; /* pointers for bugs that want to move to this tile */
+    int candidateCount; /* number of used elements of the above array */
 } Tile;
 
 void *loop(void*);
-Tile **getNeighbors(Tile***, int, int, int, int);
+Tile **getNeighbors(int, int);
+double getDistance(int, int, int, int);
+void moveBug(Bug*);
 int getInteger(char*, char*);
 double getDouble(char*, char*, double, double);
 void printUsageAndExit(void);
 void printBoard(int, int);
-void printFinalState(Point**);
+void printFinalState();
 
 Tile ***board;
-Point **bugs;
+Bug **bugs;
 Source **sources;
 int w, h, n, s, nh, nc, t, np, tilesPerThread, tilesRemainder, bugsPerThread, bugsRemainder, sourceCount;
 double c, tmin, tmax, ph, pc;
@@ -45,7 +59,7 @@ pthread_barrier_t barrier;
 int main(int argc, char *argv[]) {
     int i, j, k, size, bugsStartPoint, tilesStartPoint;
     pthread_t *threads;
-    Point *p;
+    StartPoints *p;
     
     /* Must receive 11 arguments */
     if (argc != 14)
@@ -79,7 +93,7 @@ int main(int argc, char *argv[]) {
     tilesPerThread = size / np;
     tilesRemainder = size - (np * tilesPerThread);
     bugsPerThread = n / np;
-    bugsRemainder = size - (np * bugsPerThread);
+    bugsRemainder = n - (np * bugsPerThread);
     
     /* printf("%d %d %d %d %lf %lf %d %lf %d %d %d\n", w, h, n, s, c, ph, nh, pc, nc, t, np); */
 
@@ -89,23 +103,27 @@ int main(int argc, char *argv[]) {
         board[i] = malloc(w * sizeof(Tile *));
         for (j = 0; j < w; j++) {
             board[i][j] = malloc(sizeof(Tile));
+            board[i][j]->i = i;
+            board[i][j]->j = j;
             board[i][j]->element = 0;
             board[i][j]->temperature = 0;
+            board[i][j]->candidateCount = 0;
         }
     }
 
     /* Generating bugs */
     srand(s);
-    bugs = malloc(n * sizeof(Point *));
+    bugs = malloc(n * sizeof(Bug *));
     for (k = 0; k < n; k++) {
         i = rand() % h;
         j = rand() % w;
         if (board[i][j]->element) k--;
         else {
             board[i][j]->element = 1;
-            bugs[k] = malloc(sizeof(Point));
+            bugs[k] = malloc(sizeof(Bug));
             bugs[k]->i = i;
             bugs[k]->j = j;
+            bugs[k]->nextTile = NULL;
         }
     }
     
@@ -126,10 +144,9 @@ int main(int argc, char *argv[]) {
     pthread_barrier_init(&barrier, NULL, np);
     bugsStartPoint = tilesStartPoint = 0;
     for (k = 0; k < np; k++) {
-        /* Using a Point just to store the two start points which must be passed as parameters to the thread function */
-        p = malloc(sizeof(Point));
-        p->i = bugsStartPoint;
-        p->j = tilesStartPoint;
+        p = malloc(sizeof(StartPoints));
+        p->bugs = bugsStartPoint;
+        p->sources = tilesStartPoint;
         pthread_create(&threads[k], NULL, loop, p);
         bugsStartPoint += bugsPerThread + (k < bugsRemainder ? 1 : 0);
         tilesStartPoint += tilesPerThread + (k < tilesRemainder ? 1 : 0);
@@ -138,7 +155,7 @@ int main(int argc, char *argv[]) {
     for (k = 0; k < np; k++)
         pthread_join(threads[k], NULL);
 
-    // printBoard(w, h);
+    printBoard(w, h);
     // printFinalState(bugs);
 
     /* Freeing memory */
@@ -163,23 +180,25 @@ int main(int argc, char *argv[]) {
 }
 
 void *loop(void *args) {
-    Point p = *((Point *)args);
-    int bugsStartPoint = p.i,
+    StartPoints p = *((StartPoints *)args);
+    int bugsStartPoint = p.bugs,
         bugsId = bugsStartPoint / bugsPerThread,
         bugsEndPoint = bugsStartPoint + (bugsPerThread + (bugsId < bugsRemainder ? 1 : 0)),
-        tilesStartPoint = p.j,
+        tilesStartPoint = p.sources,
         tilesId = tilesStartPoint / tilesPerThread,
         tilesEndPoint = tilesStartPoint + (tilesPerThread + (tilesId < tilesRemainder ? 1 : 0)),
-        count, i, j, k, l;
-    // double temperature;
+        count, i, j, k, l, m;
+    double d, temperature, temp, temp2;
+    Tile *next, **neighbors;
+    Bug **candidates;
     free(args);
     printf("starting thread %d (%d, %d)\n", tilesId, tilesStartPoint, tilesEndPoint);
     for (count = 0; count < t; count++) {
-        printf("iteration %d, sourceCount %d\n", count, sourceCount);
+        // printf("iteration %d, sourceCount %d\n", count, sourceCount);
+        /* Heat and cold sources */
         for (k = tilesStartPoint; k < tilesEndPoint; k++) {
             i = k / w;
             j = k % w;
-            /* Heat and cold sources */
             if (board[i][j]->element == 0) {
                 int r = rand_r(&board[i][j]->seed);
                 char hs = ((float)r / RAND_MAX) <= ph;
@@ -222,14 +241,91 @@ void *loop(void *args) {
                 }
             }
         }
-        // pthread_barrier_wait(&barrier);
+        pthread_barrier_wait(&barrier);
+        
+        /* Calculating the temperatures */
+        for (k = tilesStartPoint; k < tilesEndPoint; k++) {
+            i = k / w;
+            j = k % w;
+            board[i][j]->temperature = 0;
+            board[i][j]->candidateCount = 0;
+            for (l = 0; l < n; l++) {
+                d = getDistance(i, j, bugs[l]->i, bugs[l]->j);
+                board[i][j]->temperature += c / (d * d);
+            }
+            for (l = 0; l < sourceCount; l++) {
+                d = getDistance(i, j, sources[l]->i, sources[l]->j);
+                board[i][j]->temperature += sources[l]->emission / (d * d);
+            }
+        }
+        pthread_barrier_wait(&barrier);
 
-        /* Calculating the temperature */
+        /* Computing bugs' candidates for movement */
+        for (k = bugsStartPoint; k < bugsEndPoint; k++) {
+            temperature = board[bugs[k]->i][bugs[k]->j]->temperature;
+            if (temperature > tmax || temperature < tmin) {
+                neighbors = getNeighbors(bugs[k]->i, bugs[k]->j);
+                for (l = 0; l < 6; l++) {
+                    if (neighbors[l]) {
+                        temp = neighbors[l]->temperature;
+                        m = l;
+                        break;
+                    }
+                }
+                if (temperature > tmax) {
+                    for (l = m; l < 6; l++)
+                        if (neighbors[l] && neighbors[l]->temperature < temp) {
+                            temp = neighbors[l]->temperature;
+                            m = l;
+                        }
+                } else {
+                    for (l = m; l < 6; l++)
+                        if (neighbors[l] && neighbors[l]->temperature > temp) {
+                            temp = neighbors[l]->temperature;
+                            m = l;
+                        }
+                }
+                if (neighbors[m]->element == 0) {
+                    bugs[k]->nextTile = neighbors[m];
+                    neighbors[m]->candidates[neighbors[m]->candidateCount++] = bugs[k];
+                }
+            }
+        }
+        pthread_barrier_wait(&barrier);
+        
+        /* Computing movements */
+        for (k = bugsStartPoint; k < bugsEndPoint; k++) {
+            temperature = board[bugs[k]->i][bugs[k]->j]->temperature;
+            next = (Tile *)bugs[k]->nextTile;
+            if (next) {
+                if (next->candidateCount == 1)
+                    moveBug(bugs[k]);
+                else {
+                    candidates = next->candidates;
+                    temp = abs(next->temperature - board[candidates[0]->i][candidates[0]->j]->temperature);
+                    m = 0;
+                    for (l = 1; l < next->candidateCount; l++) {
+                        temp2 = abs(next->temperature - board[candidates[l]->i][candidates[l]->j]->temperature);
+                        if (temp2 > temp) {
+                            temp = temp2;
+                            m = l;
+                        }
+                    }
+                    for (l = 0; l < next->candidateCount; l++) {
+                        if (l == m)
+                            moveBug(candidates[l]);
+                        else
+                            candidates[l]->nextTile = NULL;
+                    }
+                }
+            }
+        }
+        pthread_barrier_wait(&barrier);
     }
     return NULL;
 }
 
-Tile **getNeighbors(Tile ***board, int i, int j, int w, int h) {
+Tile **getNeighbors(int i, int j) {
     Tile **neighbors = malloc(6 * sizeof(Tile *));
 
     if(i % 2 == 0) {
@@ -300,6 +396,20 @@ double getDistance(int i1, int j1, int i2, int j2) {
 	return sqrt(dx * dx + dy * dy);
 }
 
+void moveBug(Bug *bug) {
+    Tile *next;
+    pthread_mutex_lock(&mutex);
+    next = (Tile *)bug->nextTile;
+    if (next) {
+        board[bug->i][bug->j]->element = 0;
+        bug->i = next->i;
+        bug->j = next->j;
+        next->element = 1;
+        bug->nextTile = NULL;
+    }
+    pthread_mutex_unlock(&mutex);
+}
+
 int getInteger(char *arg, char *name) {
     int x = atoi(arg);
     if (x <= 0) {
@@ -353,7 +463,7 @@ void printBoard(int w, int h) {
     }
 }
 
-void printFinalState(Point **bugs) {
+void printFinalState() {
 	int i;
 	FILE* saida;
 
